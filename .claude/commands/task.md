@@ -265,12 +265,12 @@ Slack (concierge) — 参考情報
 
 ### 6-A. Google Doc を作成する
 
-Step 5 で生成した内容を `/tmp/task-{TODAY}.md` に書き出してから:
+`mcp__gdrive__createGoogleDoc` を使い、以下の設定で Google Doc を作成する:
+- **タイトル**: `タスクリスト — {TODAY}`
+- **親フォルダID**: `1BOIRQdX2M4uqdxRYWtPAQc4tFdydTHKH`（eng/タスク）
+- **内容**: Step 5 で生成した Markdown 全文
 
-```bash
-DOC_URL=$(python3 scripts/create_gdoc.py "タスクリスト — {TODAY}" /tmp/task-{TODAY}.md)
-echo "Doc URL: $DOC_URL"
-```
+作成後、ドキュメントの URL を `DOC_URL` として記録する。
 
 ### 6-B. リポジトリの last-task.md を更新する
 
@@ -283,11 +283,9 @@ git push
 
 ### 6-C. Gmail で通知メールを送信する
 
-概要テキストを `/tmp/task-summary-{TODAY}.txt` に書き出してから:
-
-```bash
-python3 scripts/send_gmail_notify.py "【タスクリスト】{TODAY_WITH_DOW}" /tmp/task-summary-{TODAY}.txt "$DOC_URL"
-```
+`mcp__gmail__send_email` を使い、以下の内容で送信する:
+- **宛先**: contactcomparison@gmail.com
+- **件名**: `【タスクリスト】{TODAY_WITH_DOW}`
 
 メール本文には以下を含める:
 

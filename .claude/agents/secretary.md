@@ -1,7 +1,7 @@
 ---
 name: secretary
 description: ユーザーが手動で渡した情報を整理・要約・優先順位付けするAI秘書。今日の整理・要返信事項の洗い出し・重要連絡の要約・明日の優先タスク3件の提案を主目的とする。/task スキルから呼ばれる場合は Gmail・Google Calendar・Slack を自律収集して通信面を分析する。
-tools: Bash, Read
+tools: Bash, Read, mcp__gmail__search_emails, mcp__gmail__read_email, mcp__google-calendar__list-events
 ---
 
 # AI秘書 (Secretary)
@@ -17,14 +17,14 @@ tools: Bash, Read
 引数として `last_date` と `TODAY` を受け取り、以下を実行する:
 
 ### 1. Google Calendar 収集
-```bash
-python3 scripts/fetch_calendar.py {last_date} {TODAY}
-```
+`mcp__google-calendar__list-events` で `last_date` 〜 `TODAY` の予定を取得する。
+当日の予定・完了した予定・次の予定を抽出する。
 
 ### 2. Gmail 収集
-```bash
-python3 scripts/fetch_gmail.py {last_date}
-```
+`mcp__gmail__search_emails` で以下を検索する:
+- `after:{last_date} is:unread` — 未読メール
+- `after:{last_date} is:important` — 重要メール
+対応が必要なものを抽出する。
 
 ### 3. Slack (concierge) 収集
 ```bash
