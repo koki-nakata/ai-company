@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "chatwork": {
+      "command": "python3",
+      "args": ["scripts/mcp_chatwork_server.py"],
+      "env": {
+        "CHATWORK_API_TOKEN": "${CHATWORK_API_TOKEN}"
+      }
+    },
+    "gdrive": {
+      "command": "python3",
+      "args": ["scripts/mcp_gdrive_server.py"],
+      "env": {
+        "GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID}",
+        "GOOGLE_CLIENT_SECRET": "${GOOGLE_CLIENT_SECRET}",
+        "GDRIVE_REFRESH_TOKEN": "${GDRIVE_REFRESH_TOKEN}",
+        "GDRIVE_FOLDER_ID": "1BOIRQdX2M4uqdxRYWtPAQc4tFdydTHKH"
+      }
+    },
+    "gmail": {
+      "command": "npx",
+      "args": ["-y", "@gongrzhe/server-gmail-autoauth-mcp"],
+      "env": {}
+    }
+  }
+}
