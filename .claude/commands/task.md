@@ -405,6 +405,20 @@ Step 5 で生成した Markdown 全文を、Write ツールで以下のパスに
 - 同名ファイルが既に存在する場合は上書きする（Write ツールの通常動作）
 - プレーンな Markdown ファイルなので AppleScript 等の変換・書き込み検証は不要
 
+### 6-A-2. obsidian-tasks-sync リポジトリにも反映する
+
+Obsidian Vault はこのリポジトリを git remote として追跡している。クラウド側の自動実行（Remote Trigger）が前日状態を判定する際にこのリポジトリを「前日ノートの唯一の参照先」として使うため、手動実行時も必ず反映すること:
+
+```bash
+cd "/Users/kokinakata/Library/Mobile Documents/iCloud~md~obsidian/Documents/Obsidian Vault"
+git add "todo/タスクリスト — {TODAY}.md"
+git commit -m "chore: task list {TODAY}"
+git push origin main
+```
+
+- 変更がない場合（差分なし）はコミットをスキップする
+- push が失敗した場合（iCloud同期タイミング等でconflictが起きた場合）は `git pull origin main --no-edit` してから再度 push する
+
 ### 6-B. Gmail で通知メールを送信する
 
 `mcp__gmail__send_email` を使い、以下の内容で送信する:
