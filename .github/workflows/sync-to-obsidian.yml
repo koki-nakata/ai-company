@@ -1,0 +1,51 @@
+name: Sync daily task list to Obsidian vault repo
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "tasks/daily/**.md"
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout ai-company
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Determine changed daily task files
+        id: changed
+        run: |
+          git diff --name-only HEAD~1 HEAD -- 'tasks/daily/*.md' > changed_files.txt || true
+          cat changed_files.txt
+
+      - name: Checkout obsidian-tasks-sync
+        uses: actions/checkout@v4
+        with:
+          repository: koki-nakata/obsidian-tasks-sync
+          token: ${{ secrets.SYNC_REPO_TOKEN }}
+          path: obsidian-tasks-sync
+
+      - name: Mirror changed files into vault-shaped path
+        run: |
+          mkdir -p obsidian-tasks-sync/todo
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            date=$(basename "$f" .md)
+            cp "$f" "obsidian-tasks-sync/todo/タスクリスト — ${date}.md"
+          done < changed_files.txt
+
+      - name: Commit and push if changed
+        run: |
+          cd obsidian-tasks-sync
+          git config user.name "ai-company-bot"
+          git config user.email "actions@github.com"
+          git add todo/
+          if ! git diff --cached --quiet; then
+            git commit -m "sync: daily task list $(date +%Y-%m-%d)"
+            git push
+          else
+            echo "no changes to sync"
+          fi
