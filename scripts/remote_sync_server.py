@@ -112,9 +112,12 @@ def _slack_list_channels(workspace: str) -> str:
     if not token:
         return f"Error: token for workspace '{workspace}' is not set."
     try:
+        # Note: the sankei/concierge user tokens only have channels:read
+        # (public), not groups:read (private) — requesting private_channel
+        # here would make the whole call fail with missing_scope.
         result = _slack_api(
             "conversations.list", token,
-            {"types": "public_channel,private_channel", "limit": 200, "exclude_archived": "true"},
+            {"types": "public_channel", "limit": 200, "exclude_archived": "true"},
         )
         if not result.get("ok"):
             return f"Error: {result.get('error')}"
