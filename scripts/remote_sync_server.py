@@ -192,7 +192,12 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
         if not AUTH_SECRET:
             return PlainTextResponse("Server misconfigured: MCP_AUTH_SECRET not set", status_code=500)
         auth = request.headers.get("authorization", "")
-        if auth != f"Bearer {AUTH_SECRET}":
+        # Some custom-connector UIs (e.g. claude.ai's "Add custom connector"
+        # dialog) only offer an OAuth Client ID/Secret pair, not an arbitrary
+        # header. Accept the secret as a ?auth= query param too, so it can be
+        # embedded directly in the connector URL instead.
+        query_auth = request.query_params.get("auth", "")
+        if auth != f"Bearer {AUTH_SECRET}" and query_auth != AUTH_SECRET:
             return PlainTextResponse("Unauthorized", status_code=401)
         return await call_next(request)
 
