@@ -21,6 +21,7 @@ import urllib.parse
 from datetime import datetime, timezone, timedelta
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import PlainTextResponse
 
@@ -31,7 +32,13 @@ SLACK_TOKENS = {
 }
 AUTH_SECRET = os.environ.get("MCP_AUTH_SECRET", "")
 
-mcp = FastMCP("ai-company-remote-sync")
+# Bearer-token auth (below) already gates access, so the Host-header based
+# DNS-rebinding protection (which otherwise only allows localhost) is disabled
+# here rather than trying to allow-list Render's public hostname.
+mcp = FastMCP(
+    "ai-company-remote-sync",
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+)
 
 
 # ---------- Chatwork ----------
