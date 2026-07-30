@@ -2,9 +2,13 @@ name: Sync daily task list to Obsidian vault repo
 
 on:
   push:
-    branches: [master]
+    branches:
+      - master
+      - "master-*"
+      - main
     paths:
       - "tasks/daily/**.md"
+  workflow_dispatch: {}
 
 jobs:
   mirror:
@@ -18,7 +22,13 @@ jobs:
       - name: Determine changed daily task files
         id: changed
         run: |
-          git diff --name-only HEAD~1 HEAD -- 'tasks/daily/*.md' > changed_files.txt || true
+          if git rev-parse HEAD~1 >/dev/null 2>&1; then
+            git diff --name-only HEAD~1 HEAD -- 'tasks/daily/*.md' > changed_files.txt || true
+          fi
+          if [ ! -s changed_files.txt ]; then
+            # Fallback (manual dispatch or shallow history): mirror all daily files
+            find tasks/daily -maxdepth 1 -name '*.md' > changed_files.txt || true
+          fi
           cat changed_files.txt
 
       - name: Checkout obsidian-tasks-sync
