@@ -68,16 +68,17 @@ print(f'{d}（{days[d.weekday()]}曜日）')
 
 **次に前回出力日と前回チェックリストを特定する:**
 
-以下を Bash で実行し、Obsidian Vault の `todo` フォルダにある `タスクリスト — ` で始まるノートのうち TODAY 以外で最新のノート名（= `タスクリスト — YYYY-MM-DD.md`）を取得する:
+まず実行環境を判定する。以下を Bash で実行する:
 
 ```bash
-ls "/Users/kokinakata/Library/Mobile Documents/iCloud~md~obsidian/Documents/Obsidian Vault/todo" | grep '^タスクリスト — ' | sort -r
+ls "/Users/kokinakata/Library/Mobile Documents/iCloud~md~obsidian/Documents/Obsidian Vault/todo" 2>&1
 ```
 
-この出力から `last_date` を特定する（TODAY と同じ日付のノートは除外し、最新のものを選ぶ）。
-
-- 見つかった場合: Read ツールで `/Users/kokinakata/Library/Mobile Documents/iCloud~md~obsidian/Documents/Obsidian Vault/todo/タスクリスト — {last_date}.md` を直接読み込み（プレーンな Markdown なので変換不要）、`✅ チェックリスト` セクションを読み込み、`- [ ]`（未チェック）のタスクを `pending_tasks`、`- [x]`（チェック済み、大文字Xも可）のタスクを `completed_tasks` として分類する。
-- 見つからない場合: `last_date = 昨日の日付`、`completed_tasks = []`、`pending_tasks = []` とする。
+- **成功した場合（ローカル実行）**: 出力の中から `タスクリスト — ` で始まるノートのうち TODAY 以外で最新のノート名を `last_date` として特定する。見つかった場合、Read ツールで `/Users/kokinakata/Library/Mobile Documents/iCloud~md~obsidian/Documents/Obsidian Vault/todo/タスクリスト — {last_date}.md` を直接読み込み（プレーンな Markdown なので変換不要）、`✅ チェックリスト` セクションを読み込み、`- [ ]`（未チェック）のタスクを `pending_tasks`、`- [x]`（チェック済み、大文字Xも可）のタスクを `completed_tasks` として分類する。見つからない場合は `last_date = 昨日の日付`、`completed_tasks = []`、`pending_tasks = []` とする。
+- **失敗した場合（クラウド実行 / Remote Trigger）**: Obsidian Vault はローカルiCloudフォルダのため、クラウド環境からは参照できない。代わりに以下を確認する:
+  1. リポジトリ内の `tasks/daily/_vault-state.md` を Read する。このファイルは `pull-vault-state.yml`（GitHub Actions、クラウド実行の直前に毎朝走る）が obsidian-tasks-sync リポジトリから同期した「ユーザーが実際にチェックした最新の前回ノート」であり、ローカル実行時の Obsidian Vault 直接参照と等価な情報源である。**`tasks/daily/` 内の過去の自分自身の出力ファイルより、このファイルの方を優先する**（過去の自己出力は実際のチェック状態を反映していないため、優先すると前日消し込み済みタスクの再出現やタスクの取りこぼしを招く）。
+     - ファイル冒頭のコメント `<!-- source: ... -->` から元ノートの日付を `last_date` として抽出し、`✅ チェックリスト` セクションを上記と同じルールで `pending_tasks` / `completed_tasks` に分類する。
+  2. `tasks/daily/_vault-state.md` が存在しない（`pull-vault-state.yml` が未設置、または同期対象ノートがまだない）場合のみ、`tasks/daily/` 内で TODAY 以外の最新ファイルを `last_date` として使うフォールバックに切り替える。この場合は前回のチェック状態が不明なため、`completed_tasks = []` とし、`pending_tasks` は前回ファイルの本文から拾える範囲のタスク名とする。
 - **`✅ チェックリスト` セクション内にユーザーが手書きで追加した自由記述行（`- [ ]` 形式でない、既存タスクの間や末尾に挿入された単語・短文など）がある場合は `handwritten_tasks` として別途抽出する。** これらは推測でタスク化せず、当日のタスクリストに必ず追加すること（詳細情報がGmail/Chatwork/Slackで確認できなければ「本人手書き追加・詳細未確認」と明記し、優先度不明な場合は🟡優先に分類する）。除外・「未確認」として無視するだけの扱いはしない。
 
 ---
@@ -93,9 +94,9 @@ Step 1 で取得した Obsidian Vault 前回ノートのチェックリストか
 - **pending_tasks**: `- [ ]`（未チェック）のタスク名の一覧（未完了・持ち越し候補）
 
 **【役割分担】**
-- **Chatwork**: pm エージェントが `scripts/fetch_chatwork.py` で自律収集（Bash 実行可）
+- **Chatwork**: pm エージェントが自律収集。ローカル実行時は `scripts/fetch_chatwork.py`（Bash 実行）、クラウド実行時（Chatwork用MCPツールが `mcp__gmail__*` 等と異なり `mcp__*ai-company-sync__*` 名前空間で提供されている場合）は同ツール名前空間の `chatwork_fetch_since(since_date)` を使う（Chatwork APIトークンにアクセスできるのはこのカスタムコネクタ経由のみで、クラウド環境から `scripts/fetch_chatwork.py` を直接実行することはできない）。
 - **Gmail**: メインエージェントが MCP で収集 → secretary に渡す
-- **Slack**: メインエージェントが MCP で収集 → secretary に渡す
+- **Slack**: メインエージェントが MCP で収集 → secretary に渡す。クラウド実行時は `slack_sankei_get_channel_history` / `slack_concierge_get_channel_history` の `since_date` 引数（YYYY-MM-DD）にその都度 `last_date` を渡し、サーバー側で期間フィルタさせる（目視フィルタに頼らない）
 
 ---
 
@@ -122,7 +123,9 @@ koto-hsc のメールは Gmail の自動分類で埋もれやすいため、ド�
 
 ### Slack — 全チャンネルスキャン + タイムスタンプ手動フィルタ
 
-Slack MCP の `get_channel_history` は期間指定パラメータを持たないため、メッセージ取得後に `ts`（Unix 秒）で手動フィルタする。
+**クラウド実行時**: カスタムコネクタの `slack_sankei_get_channel_history` / `slack_concierge_get_channel_history` は `since_date`（YYYY-MM-DD、`last_date` を渡す）引数をサポートしており、サーバー側で期間フィルタ済みの結果が返る。この場合は以下の手動 `ts` フィルタ手順は不要。
+
+**ローカル実行時**: ローカルの Slack MCP（`mcp__slack-sankei__*` / `mcp__slack-concierge__*`）の `get_channel_history` は期間指定パラメータを持たないため、メッセージ取得後に `ts`（Unix 秒）で手動フィルタする。
 
 `last_date` を Unix タイムスタンプに変換する:
 ```python
@@ -192,8 +195,9 @@ print(int(d.timestamp()))  # → last_date_ts（float）
 > - 他メンバーのタスク（八原・川元・吉田・楠田など）: 中田のリストには含めず「チームの動き」として記録
 > - 相手待ち: 中田が依頼済みで返答待ちのもの → 「中田のタスク」ではなく「相手待ち」として分類
 >
-> Chatwork は以下のコマンドで自律収集してください:
-> python3 scripts/fetch_chatwork.py {last_date}
+> Chatwork は以下で自律収集してください:
+> ローカル実行時: python3 scripts/fetch_chatwork.py {last_date}
+> クラウド実行時（scripts/fetch_chatwork.py が実行できない/Chatwork APIトークンにアクセスできない環境）: カスタムコネクタの chatwork_fetch_since(since_date="{last_date}") を使う（ルームのlast_update_time・メッセージのsend_timeで {last_date} 以降にサーバー側で絞り込み済み）
 >
 > 長期スケジュールは tasks/long-term-schedule.md を読み込んでください。
 >

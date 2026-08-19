@@ -96,6 +96,71 @@ def chatwork_list_room_messages(room_id: int, force: bool = True) -> str:
         return f"Error: {e}"
 
 
+@mcp.tool()
+def chatwork_fetch_since(since_date: str) -> str:
+    """Fetch all Chatwork rooms updated since a given date, with messages filtered
+    to that window. Mirrors the local scripts/fetch_chatwork.py logic (last_update_time
+    pre-filter on rooms, send_time filter on messages) so the cloud run gets the same
+    precision as a local /task run instead of an unfiltered recent-N-messages dump.
+
+    Args:
+        since_date: JST date in YYYY-MM-DD format. Only rooms/messages updated on or
+            after this date (00:00 JST) are included.
+    """
+    if not CHATWORK_TOKEN:
+        return "Error: CHATWORK_API_TOKEN is not set."
+    try:
+        since_ts = int(
+            datetime.strptime(since_date, "%Y-%m-%d")
+            .replace(tzinfo=timezone(timedelta(hours=9)))
+            .timestamp()
+        )
+    except ValueError:
+        return f"Error: since_date must be YYYY-MM-DD, got {since_date!r}"
+
+    try:
+        rooms = _cw_get("/rooms")
+    except Exception as e:
+        return f"Error fetching rooms: {e}"
+
+    active_rooms = [r for r in rooms if r.get("last_update_time", 0) >= since_ts]
+    if not active_rooms:
+        return f"（{since_date} 以降に更新のあったルームなし）"
+
+    out = [f"## Chatwork — {since_date} 以降に更新があったルーム\n",
+           f"更新ルーム数: {len(active_rooms)} / 全{len(rooms)}ルーム\n"]
+
+    for room in sorted(active_rooms, key=lambda r: r.get("last_update_time", 0), reverse=True):
+        room_id = room["room_id"]
+        room_name = room.get("name", str(room_id))
+        badges = ""
+        if room.get("mention_num"):
+            badges += f"【メンション{room['mention_num']}件】"
+        if room.get("unread_num"):
+            badges += f"【未読{room['unread_num']}件】"
+
+        try:
+            msgs = _cw_get(f"/rooms/{room_id}/messages?force=1")
+        except Exception:
+            continue
+
+        recent = [m for m in msgs if m.get("send_time", 0) >= since_ts]
+        if not recent:
+            continue
+
+        out.append(f"### {room_name} {badges}(room_id: {room_id})")
+        for m in recent[-50:]:
+            ts = m.get("send_time", 0)
+            dt = datetime.fromtimestamp(ts, tz=timezone(timedelta(hours=9))).strftime("%m/%d %H:%M")
+            sender = m.get("account", {}).get("name", "")
+            account_id = m.get("account", {}).get("account_id", "")
+            body = m.get("body", "")[:400].replace("\n", " ")
+            out.append(f"- [{dt}] {sender}(id:{account_id}): {body}")
+        out.append("")
+
+    return "\n".join(out)
+
+
 # ---------- Slack ----------
 
 def _slack_api(endpoint: str, token: str, params: dict | None = None) -> dict:
@@ -129,14 +194,22 @@ def _slack_list_channels(workspace: str) -> str:
         return f"Error: {e}"
 
 
-def _slack_get_channel_history(workspace: str, channel_id: str, limit: int = 50) -> str:
+def _slack_get_channel_history(workspace: str, channel_id: str, limit: int = 50, since_date: str = "") -> str:
     token = SLACK_TOKENS.get(workspace, "")
     if not token:
         return f"Error: token for workspace '{workspace}' is not set."
+    params = {"channel": channel_id, "limit": limit}
+    if since_date:
+        try:
+            params["oldest"] = str(
+                datetime.strptime(since_date, "%Y-%m-%d")
+                .replace(tzinfo=timezone(timedelta(hours=9)))
+                .timestamp()
+            )
+        except ValueError:
+            return f"Error: since_date must be YYYY-MM-DD, got {since_date!r}"
     try:
-        result = _slack_api(
-            "conversations.history", token, {"channel": channel_id, "limit": limit}
-        )
+        result = _slack_api("conversations.history", token, params)
         if not result.get("ok"):
             return f"Error: {result.get('error')}"
         msgs = result.get("messages", [])
@@ -161,14 +234,17 @@ def slack_sankei_list_channels() -> str:
 
 
 @mcp.tool()
-def slack_sankei_get_channel_history(channel_id: str, limit: int = 50) -> str:
+def slack_sankei_get_channel_history(channel_id: str, limit: int = 50, since_date: str = "") -> str:
     """Get recent messages from a channel in the sankei workspace.
 
     Args:
         channel_id: The Slack channel ID (e.g. C034JJMV55K).
         limit: Number of messages to retrieve (default 50).
+        since_date: Optional JST date (YYYY-MM-DD). If set, only messages on or after
+            this date are returned (filtered server-side via Slack's `oldest` param),
+            instead of relying on the caller to eyeball timestamps.
     """
-    return _slack_get_channel_history("sankei", channel_id, limit)
+    return _slack_get_channel_history("sankei", channel_id, limit, since_date)
 
 
 @mcp.tool()
@@ -178,14 +254,17 @@ def slack_concierge_list_channels() -> str:
 
 
 @mcp.tool()
-def slack_concierge_get_channel_history(channel_id: str, limit: int = 50) -> str:
+def slack_concierge_get_channel_history(channel_id: str, limit: int = 50, since_date: str = "") -> str:
     """Get recent messages from a channel in the concierge workspace.
 
     Args:
         channel_id: The Slack channel ID.
         limit: Number of messages to retrieve (default 50).
+        since_date: Optional JST date (YYYY-MM-DD). If set, only messages on or after
+            this date are returned (filtered server-side via Slack's `oldest` param),
+            instead of relying on the caller to eyeball timestamps.
     """
-    return _slack_get_channel_history("concierge", channel_id, limit)
+    return _slack_get_channel_history("concierge", channel_id, limit, since_date)
 
 
 # ---------- Auth middleware ----------

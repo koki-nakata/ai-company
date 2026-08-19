@@ -1,0 +1,57 @@
+name: Pull vault checklist state before cloud task run
+
+# The cloud /task run (claude.ai Remote Trigger) has no filesystem access to the
+# Obsidian Vault (it's a local iCloud folder), so it cannot see which checklist
+# items the user has actually checked off there. This job runs shortly before the
+# scheduled cloud task (which has historically fired ~08:00-08:15 JST) and copies
+# the latest real checklist state from the obsidian-tasks-sync repo into
+# tasks/daily/_vault-state.md, so the cloud run can read genuine completion state
+# instead of re-guessing it from Chatwork/Slack/Gmail content each morning.
+#
+# If you change the cloud schedule time, adjust the cron below to still run first.
+
+on:
+  schedule:
+    - cron: "50 22 * * *"  # 07:50 JST
+  workflow_dispatch: {}
+
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout ai-company
+        uses: actions/checkout@v4
+
+      - name: Checkout obsidian-tasks-sync
+        uses: actions/checkout@v4
+        with:
+          repository: koki-nakata/obsidian-tasks-sync
+          token: ${{ secrets.SYNC_REPO_TOKEN }}
+          path: obsidian-tasks-sync
+
+      - name: Copy latest checklist state into ai-company
+        run: |
+          mkdir -p tasks/daily
+          latest=$(ls obsidian-tasks-sync/todo 2>/dev/null | grep '^タスクリスト — ' | sort -r | head -1)
+          if [ -z "$latest" ]; then
+            echo "no vault notes found in obsidian-tasks-sync/todo"
+            exit 0
+          fi
+          {
+            echo "<!-- source: obsidian-tasks-sync/todo/${latest} -->"
+            echo "<!-- synced: $(date -u +%Y-%m-%dT%H:%M:%SZ) -->"
+            echo
+            cat "obsidian-tasks-sync/todo/${latest}"
+          } > tasks/daily/_vault-state.md
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "ai-company-bot"
+          git config user.email "actions@github.com"
+          git add tasks/daily/_vault-state.md
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: sync vault checklist state $(date +%Y-%m-%d)"
+            git push
+          else
+            echo "no changes to sync"
+          fi
