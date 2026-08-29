@@ -1,3 +1,6 @@
+<!-- source: obsidian-tasks-sync/todo/タスクリスト — _vault-state.md -->
+<!-- synced: 2026-08-29T03:54:21Z -->
+
 <!-- source: obsidian-tasks-sync/todo/タスクリスト — 2026-08-29.md -->
 <!-- synced: 2026-08-29T01:09:22Z -->
 
