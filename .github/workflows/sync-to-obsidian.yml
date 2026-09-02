@@ -25,12 +25,17 @@ jobs:
       - name: Determine changed daily task files
         id: changed
         run: |
+          # _vault-state.md is pull-vault-state.yml's incoming sync target, not a
+          # daily task list — it must never be mirrored back to obsidian-tasks-sync.
+          # A prior version of this step mirrored it as "タスクリスト — _vault-state.md",
+          # which (since "_" sorts after digits) permanently won pull-vault-state.yml's
+          # `sort -r | head -1` "latest note" lookup and froze carry-over for days.
           if git rev-parse HEAD~1 >/dev/null 2>&1; then
-            git diff --name-only HEAD~1 HEAD -- 'tasks/daily/*.md' > changed_files.txt || true
+            git diff --name-only HEAD~1 HEAD -- 'tasks/daily/*.md' | grep -v '/_vault-state\.md$' > changed_files.txt || true
           fi
           if [ ! -s changed_files.txt ]; then
             # Fallback (manual dispatch or shallow history): mirror all daily files
-            find tasks/daily -maxdepth 1 -name '*.md' > changed_files.txt || true
+            find tasks/daily -maxdepth 1 -name '*.md' ! -name '_vault-state.md' > changed_files.txt || true
           fi
           cat changed_files.txt
 

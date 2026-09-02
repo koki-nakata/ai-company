@@ -35,7 +35,14 @@ jobs:
       - name: Copy latest checklist state into ai-company
         run: |
           mkdir -p tasks/daily
-          latest=$(ls obsidian-tasks-sync/todo 2>/dev/null | grep '^タスクリスト — ' | sort -r | head -1)
+          # Match only real dated notes (タスクリスト — YYYY-MM-DD.md). A loose
+          # prefix match previously also matched the mirrored junk file
+          # "タスクリスト — _vault-state.md" (created by a sync-to-obsidian.yml
+          # bug, now fixed) — since "_" sorts after digits, `sort -r` picked
+          # that frozen file as "latest" forever, silently freezing this file
+          # and breaking carry-over of pending tasks for days. Do not loosen
+          # this pattern without also checking sync-to-obsidian.yml's exclude.
+          latest=$(ls obsidian-tasks-sync/todo 2>/dev/null | grep -E '^タスクリスト — [0-9]{4}-[0-9]{2}-[0-9]{2}\.md$' | sort -r | head -1)
           if [ -z "$latest" ]; then
             echo "no vault notes found in obsidian-tasks-sync/todo"
             exit 0
