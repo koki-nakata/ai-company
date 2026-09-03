@@ -85,9 +85,9 @@ def chatwork_list_room_messages(room_id: int, force: bool = True) -> str:
         if not msgs:
             return "（メッセージなし）"
         lines = [f"## room_id={room_id} メッセージ\n"]
-        for m in msgs[:50]:
+        for m in msgs[-50:]:
             ts = m.get("send_time", 0)
-            dt = datetime.fromtimestamp(ts, tz=timezone(timedelta(hours=9))).strftime("%m/%d %H:%M")
+            dt = datetime.fromtimestamp(ts, tz=timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M")
             sender = m.get("account", {}).get("name", "")[:20]
             body = m.get("body", "")[:200].replace("\n", " ")
             lines.append(f"- [{dt}] {sender}: {body}")
@@ -151,7 +151,7 @@ def chatwork_fetch_since(since_date: str) -> str:
         out.append(f"### {room_name} {badges}(room_id: {room_id})")
         for m in recent[-50:]:
             ts = m.get("send_time", 0)
-            dt = datetime.fromtimestamp(ts, tz=timezone(timedelta(hours=9))).strftime("%m/%d %H:%M")
+            dt = datetime.fromtimestamp(ts, tz=timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M")
             sender = m.get("account", {}).get("name", "")
             account_id = m.get("account", {}).get("account_id", "")
             body = m.get("body", "")[:400].replace("\n", " ")
@@ -218,7 +218,7 @@ def _slack_get_channel_history(workspace: str, channel_id: str, limit: int = 50,
         lines = [f"## Slack ({workspace}) #{channel_id} メッセージ\n"]
         for m in msgs:
             ts = float(m.get("ts", 0))
-            dt_str = datetime.fromtimestamp(ts, tz=timezone(timedelta(hours=9))).strftime("%m/%d %H:%M")
+            dt_str = datetime.fromtimestamp(ts, tz=timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M")
             user = m.get("user", m.get("username", ""))[:15]
             text = m.get("text", "")[:300].replace("\n", " ")
             lines.append(f"- [{dt_str}] {user}: {text}")
