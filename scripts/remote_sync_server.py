@@ -269,8 +269,20 @@ def slack_concierge_get_channel_history(channel_id: str, limit: int = 50, since_
 
 # ---------- Auth middleware ----------
 
+# OAuth discovery paths are left unauthenticated so they can 404. A client that
+# gets 401 here concludes the server is OAuth-protected and moves on to dynamic
+# client registration, which this server does not implement -- claude.ai's
+# connector dialog then fails with "could not register with the sign-in
+# service ... add an OAuth Client ID". A 404 instead tells the client there is
+# no OAuth to negotiate, so it connects with the URL as given (?auth= included).
+# Nothing behind these paths exists, so exempting them exposes nothing.
+PUBLIC_PATH_PREFIXES = ("/.well-known/",)
+
+
 class BearerAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
+        if request.url.path.startswith(PUBLIC_PATH_PREFIXES):
+            return await call_next(request)
         if not AUTH_SECRET:
             return PlainTextResponse("Server misconfigured: MCP_AUTH_SECRET not set", status_code=500)
         auth = request.headers.get("authorization", "")
