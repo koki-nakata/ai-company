@@ -2,17 +2,27 @@ name: Pull vault checklist state before cloud task run
 
 # The cloud /task run (claude.ai Remote Trigger) has no filesystem access to the
 # Obsidian Vault (it's a local iCloud folder), so it cannot see which checklist
-# items the user has actually checked off there. This job runs shortly before the
-# scheduled cloud task (which has historically fired ~08:00-08:15 JST) and copies
-# the latest real checklist state from the obsidian-tasks-sync repo into
-# tasks/daily/_vault-state.md, so the cloud run can read genuine completion state
-# instead of re-guessing it from Chatwork/Slack/Gmail content each morning.
+# items the user has actually checked off there. This job copies the latest real
+# checklist state from the obsidian-tasks-sync repo into tasks/daily/_vault-state.md,
+# so the cloud run can read genuine completion state instead of re-guessing it
+# from Chatwork/Slack/Gmail content each morning.
 #
-# If you change the cloud schedule time, adjust the cron below to still run first.
+# Timing matters, and getting it wrong is silent. The cloud task fires ~08:15 JST.
+# This job used to be scheduled at 07:50 JST on the assumption that "just before"
+# was enough, but GitHub delays scheduled runs: every actual start between 08-31
+# and 09-05 landed at 09:24-10:24 JST, i.e. AFTER the cloud run. That broke
+# carry-over twice over:
+#   1. the cloud run read a file last written the PREVIOUS morning, and
+#   2. by the time this job ran, today's freshly generated note had already been
+#      mirrored into obsidian-tasks-sync, so `sort -r | head -1` picked that
+#      all-unchecked note and skipped straight past the day whose boxes the user
+#      had actually ticked. The user's checkmarks were never observed at all.
+# Hence both guards below: an early cron with hours of slack for GitHub's delay,
+# and an explicit skip of today's note so a late run still picks the right file.
 
 on:
   schedule:
-    - cron: "50 22 * * *"  # 07:50 JST
+    - cron: "0 18 * * *"  # 03:00 JST -- ~5h of slack before the 08:15 JST cloud run
   workflow_dispatch: {}
 
 permissions:
@@ -35,6 +45,10 @@ jobs:
       - name: Copy latest checklist state into ai-company
         run: |
           mkdir -p tasks/daily
+          # Today in JST, not UTC: this job runs at 18:00 UTC, which is already
+          # the next day in Tokyo, so `date -u` would name the wrong day and the
+          # skip below would not skip anything.
+          today=$(TZ=Asia/Tokyo date +%F)
           # Match only real dated notes (タスクリスト — YYYY-MM-DD.md). A loose
           # prefix match previously also matched the mirrored junk file
           # "タスクリスト — _vault-state.md" (created by a sync-to-obsidian.yml
@@ -42,9 +56,15 @@ jobs:
           # that frozen file as "latest" forever, silently freezing this file
           # and breaking carry-over of pending tasks for days. Do not loosen
           # this pattern without also checking sync-to-obsidian.yml's exclude.
-          latest=$(ls obsidian-tasks-sync/todo 2>/dev/null | grep -E '^タスクリスト — [0-9]{4}-[0-9]{2}-[0-9]{2}\.md$' | sort -r | head -1)
+          # Today's note is excluded because it is the cloud run's own output
+          # from a few hours ago with nothing ticked yet; the state worth
+          # carrying over is always the most recent note from a previous day.
+          latest=$(ls obsidian-tasks-sync/todo 2>/dev/null \
+            | grep -E '^タスクリスト — [0-9]{4}-[0-9]{2}-[0-9]{2}\.md$' \
+            | grep -v -x -F "タスクリスト — ${today}.md" \
+            | sort -r | head -1)
           if [ -z "$latest" ]; then
-            echo "no vault notes found in obsidian-tasks-sync/todo"
+            echo "no vault notes found in obsidian-tasks-sync/todo (excluding today, ${today})"
             exit 0
           fi
           {
@@ -53,6 +73,19 @@ jobs:
             echo
             cat "obsidian-tasks-sync/todo/${latest}"
           } > tasks/daily/_vault-state.md
+
+          # Log what was picked up. If checked=0 every single day, this job is
+          # snapshotting notes before the user has ticked anything -- the exact
+          # failure this workflow's header describes.
+          checked=$(grep -c -E '^- \[[xX]\]' "obsidian-tasks-sync/todo/${latest}" || true)
+          pending=$(grep -c -E '^- \[ \]' "obsidian-tasks-sync/todo/${latest}" || true)
+          echo "picked: ${latest} (today=${today}) -- checked=${checked} pending=${pending}"
+          {
+            echo "### Vault state pulled"
+            echo "- source: \`${latest}\`"
+            echo "- today (JST): \`${today}\`"
+            echo "- checked: **${checked}**, pending: **${pending}**"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Commit and push if changed
         run: |
