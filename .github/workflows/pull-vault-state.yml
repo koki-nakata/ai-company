@@ -105,18 +105,85 @@ jobs:
             echo "- checked: **${checked}**, pending: **${pending}**"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Commit and push if changed
+      # If this run is late enough that the cloud run already produced today's
+      # note, that note was built from stale state. Compare what the cloud run
+      # actually read (the _vault-state.md on its own branch) with the correct
+      # state just pulled, and patch today's note in obsidian-tasks-sync in place
+      # (add dropped tasks, tick items already done). Patching in place, not
+      # regenerating, keeps anything the user has ticked in today's note since.
+      - name: Repair today's note if the cloud run read stale state
+        id: repair
+        run: |
+          today=$(TZ=Asia/Tokyo date +%F)
+          note="obsidian-tasks-sync/todo/タスクリスト — ${today}.md"
+          result="not needed (cloud run has not produced today's note yet)"
+          if [ -f "$note" ]; then
+            # The cloud run's branch name has changed before without notice, so
+            # find it by commit subject across all branches, not by name.
+            git fetch -q --depth=1 origin '+refs/heads/*:refs/remotes/origin/*'
+            br=$(git for-each-ref --sort=-committerdate \
+                   --format='%(refname:short)%09%(subject)' refs/remotes/origin \
+                 | awk -F'\t' -v s="chore: daily task list ${today}" 'index($2, s) == 1 { print $1; exit }')
+            if [ -z "$br" ]; then
+              result="skipped (no cloud run branch found for ${today})"
+            else
+              git show "${br}:tasks/daily/_vault-state.md" > "$RUNNER_TEMP/seen.md" 2>/dev/null \
+                || : > "$RUNNER_TEMP/seen.md"
+              # A repair failure must not stop the vault-state sync below.
+              out=$(python3 scripts/repair_carryover.py "$RUNNER_TEMP/seen.md" tasks/daily/_vault-state.md "$note" 2>&1) \
+                || out="error: repair script failed: ${out}"
+              echo "$out"
+              result=$(echo "$out" | head -1)
+              if [ "${result%%:*}" = "repaired" ]; then
+                cd obsidian-tasks-sync
+                git config user.name "ai-company-bot"
+                git config user.email "actions@github.com"
+                git add todo/
+                git commit -q -m "repair: carry-over for ${today} (vault-state sync landed after the cloud run)"
+                # The user's Obsidian Git may have pushed in the meantime.
+                git pull -q --rebase && git push -q || result="${result} (push FAILED)"
+              fi
+            fi
+          fi
+          echo "result=${result}" >> "$GITHUB_OUTPUT"
+          echo "### Carry-over repair: ${result}" >> "$GITHUB_STEP_SUMMARY"
+
+      # Persist every run's actual start time against its scheduled slot, so
+      # GitHub's cron delay is visible over time (logs/vault-sync.tsv).
+      - name: Record sync timing
+        env:
+          SLOT: ${{ github.event.schedule }}
+          REPAIR: ${{ steps.repair.outputs.result }}
+        run: |
+          log=logs/vault-sync.tsv
+          mkdir -p logs
+          [ -f "$log" ] || printf 'started_jst\tslot_jst\tdelay_min\tsource\tcarryover_repair\n' > "$log"
+          now=$(date -u +%s)
+          if [ -n "$SLOT" ]; then
+            read -r m h _ <<< "$SLOT"
+            sched=$(date -u -d "$(date -u +%F) ${h}:${m}" +%s)
+            [ "$sched" -gt "$now" ] && sched=$((sched - 86400))
+            slot=$(TZ=Asia/Tokyo date -d "@$sched" +%H:%M)
+            delay=$(( (now - sched) / 60 ))
+          else
+            slot=manual; delay=-
+          fi
+          src=$(head -1 tasks/daily/_vault-state.md | sed -E 's/.*todo\/(.*) -->/\1/')
+          printf '%s\t%s\t%s\t%s\t%s\n' "$(TZ=Asia/Tokyo date '+%F %H:%M')" "$slot" "$delay" "$src" "$REPAIR" >> "$log"
+          tail -1 "$log"
+          echo "- started $(TZ=Asia/Tokyo date +%H:%M) JST, slot ${slot}, delay **${delay} min**" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit and push
         run: |
           git config user.name "ai-company-bot"
           git config user.email "actions@github.com"
-          # Ignore the "synced:" timestamp so the repeated nightly runs only
-          # commit when the note itself (source or checkmarks) actually changed.
+          # Don't commit a _vault-state.md whose only change is the "synced:"
+          # timestamp; the timing log already records that this run happened.
           f=tasks/daily/_vault-state.md
-          if ! cmp -s <(git show "HEAD:$f" 2>/dev/null | grep -v '^<!-- synced: ') \
-                      <(grep -v '^<!-- synced: ' "$f"); then
-            git add "$f"
-            git commit -m "chore: sync vault checklist state $(date +%Y-%m-%d)"
-            git push
-          else
-            echo "no changes to sync"
+          if cmp -s <(git show "HEAD:$f" 2>/dev/null | grep -v '^<!-- synced: ') \
+                    <(grep -v '^<!-- synced: ' "$f"); then
+            git checkout -- "$f"
           fi
+          git add "$f" logs/vault-sync.tsv
+          git commit -q -m "chore: sync vault checklist state $(TZ=Asia/Tokyo date +%Y-%m-%d)"
+          git push
