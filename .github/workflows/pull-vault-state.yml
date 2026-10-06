@@ -1,5 +1,13 @@
 name: Pull vault checklist state before cloud task run
 
+# NOTE (2026-10-06): this job is now a FALLBACK. GitHub's cron delay kept
+# growing until it landed after the cloud run, so the cloud routine now mounts
+# obsidian-tasks-sync as a second source and reads the previous day's note
+# directly at run time (writing what it read to tasks/daily/_vault-state.md in
+# its own commit). This job remains for (a) the carry-over repair step below,
+# which compares that record against the real note when they differ, and
+# (b) the delay log in logs/vault-sync.tsv.
+#
 # The cloud /task run (claude.ai Remote Trigger) has no filesystem access to the
 # Obsidian Vault (it's a local iCloud folder), so it cannot see which checklist
 # items the user has actually checked off there. This job copies the latest real
