@@ -17,13 +17,31 @@ name: Pull vault checklist state before cloud task run
 #      mirrored into obsidian-tasks-sync, so `sort -r | head -1` picked that
 #      all-unchecked note and skipped straight past the day whose boxes the user
 #      had actually ticked. The user's checkmarks were never observed at all.
-# Hence both guards below: an early cron with hours of slack for GitHub's delay,
+# Hence both guards below: early crons with hours of slack for GitHub's delay,
 # and an explicit skip of today's note so a late run still picks the right file.
+#
+# A single 03:00 JST cron was not enough either: GitHub's delay kept growing
+# (starts drifted from ~05:20 to 08:29 JST by 10-06), and on 10-06 the only run
+# landed 9 minutes AFTER the cloud run, which then read the note from two days
+# earlier and dropped the previous day's handwritten tasks and checkmarks.
+# So fire several times through the night, off the top of the hour (the most
+# congested slot). Every run is idempotent -- it only commits when the picked
+# note changed -- so extra runs are free, and later ones also pick up any boxes
+# ticked after midnight. Do not schedule before 15:00 UTC (00:00 JST): the
+# "today" skip below would then skip the wrong day and pick the day before.
 
 on:
   schedule:
-    - cron: "0 18 * * *"  # 03:00 JST -- ~5h of slack before the 08:15 JST cloud run
+    - cron: "10 15 * * *"  # 00:10 JST
+    - cron: "10 17 * * *"  # 02:10 JST
+    - cron: "10 19 * * *"  # 04:10 JST
+    - cron: "10 21 * * *"  # 06:10 JST -- latest slot; cloud run fires ~08:10 JST
   workflow_dispatch: {}
+
+# Overlapping delayed runs must not race each other's push.
+concurrency:
+  group: pull-vault-state
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -91,8 +109,12 @@ jobs:
         run: |
           git config user.name "ai-company-bot"
           git config user.email "actions@github.com"
-          git add tasks/daily/_vault-state.md
-          if ! git diff --cached --quiet; then
+          # Ignore the "synced:" timestamp so the repeated nightly runs only
+          # commit when the note itself (source or checkmarks) actually changed.
+          f=tasks/daily/_vault-state.md
+          if ! cmp -s <(git show "HEAD:$f" 2>/dev/null | grep -v '^<!-- synced: ') \
+                      <(grep -v '^<!-- synced: ' "$f"); then
+            git add "$f"
             git commit -m "chore: sync vault checklist state $(date +%Y-%m-%d)"
             git push
           else
