@@ -1,5 +1,5 @@
 <!-- source: obsidian-tasks-sync/todo/タスクリスト — 2026-10-22.md -->
-<!-- synced: 2026-10-22T19:12:30Z -->
+<!-- synced: 2026-10-22T23:07:55Z (read directly by cloud run) -->
 
 > 作成: 2026-10-22 (木) 08:00 JST（クラウド自動実行）
 
