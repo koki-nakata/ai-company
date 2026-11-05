@@ -15,6 +15,7 @@ Required environment variables:
                        "Authorization: Bearer <MCP_AUTH_SECRET>"
 """
 import os
+import re
 import json
 import urllib.request
 import urllib.parse
@@ -172,6 +173,31 @@ def _slack_api(endpoint: str, token: str, params: dict | None = None) -> dict:
         return json.loads(r.read())
 
 
+# Slack message text only carries raw IDs ("<@U09691V4WNS>"). The cloud run decides
+# whether a concierge message is a task by looking for the name "中田", so unresolved
+# IDs made real requests read as addressed to someone else.
+_MENTION_RE = re.compile(r"<@([UW][A-Z0-9]+)(?:\|[^>]*)?>")
+_slack_user_names: dict[tuple[str, str], str] = {}
+
+
+def _slack_user_name(workspace: str, token: str, user_id: str) -> str:
+    key = (workspace, user_id)
+    if key in _slack_user_names:
+        return _slack_user_names[key]
+    try:
+        result = _slack_api("users.info", token, {"user": user_id})
+    except Exception:
+        return user_id
+    if not result.get("ok"):
+        return user_id
+    profile = result.get("user", {}).get("profile", {})
+    name = profile.get("real_name") or profile.get("display_name")
+    if not name:
+        return user_id
+    _slack_user_names[key] = name
+    return name
+
+
 def _slack_list_channels(workspace: str) -> str:
     token = SLACK_TOKENS.get(workspace, "")
     if not token:
@@ -219,8 +245,11 @@ def _slack_get_channel_history(workspace: str, channel_id: str, limit: int = 50,
         for m in msgs:
             ts = float(m.get("ts", 0))
             dt_str = datetime.fromtimestamp(ts, tz=timezone(timedelta(hours=9))).strftime("%Y-%m-%d %H:%M")
-            user = m.get("user", m.get("username", ""))[:15]
-            text = m.get("text", "")[:300].replace("\n", " ")
+            user = _slack_user_name(workspace, token, m["user"]) if m.get("user") else m.get("username", "")
+            text = _MENTION_RE.sub(
+                lambda match: "@" + _slack_user_name(workspace, token, match.group(1)),
+                m.get("text", ""),
+            )[:300].replace("\n", " ")
             lines.append(f"- [{dt_str}] {user}: {text}")
         return "\n".join(lines)
     except Exception as e:
