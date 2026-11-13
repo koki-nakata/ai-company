@@ -1,5 +1,5 @@
 <!-- source: obsidian-tasks-sync/todo/タスクリスト — 2026-11-13.md -->
-<!-- synced: 2026-11-13T21:25:05Z -->
+<!-- synced: 2026-11-13T23:08:10Z (read directly by cloud run) -->
 
 ✅ チェックリスト（完了したらチェックを入れる）
 
